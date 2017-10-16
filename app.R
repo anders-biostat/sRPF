@@ -13,15 +13,15 @@ library( tidyverse )
 library( forcats )
 library( binom )
 
-datadir <- path.expand( "~/w/diary-simon/2017-Q3/Lena" )
+datadir <- "."
 
 mAP <- 
-  read_csv( file.path( datadir, "LG10_SecB_AP.csv" ), n_max=10 ) %>% 
+  read_csv( file.path( datadir, "LG10_SecB_AP.csv" ) ) %>% 
   filter( gene != "ddl" ) %>% 
   column_to_rownames( "gene" ) %>% as.matrix
 
 mTT <- 
-  read_csv( file.path( datadir, "LG11_SecB_TT.csv" ), n_max=10 ) %>% 
+  read_csv( file.path( datadir, "LG11_SecB_TT.csv" ) ) %>% 
   filter( gene != "ddl" ) %>% 
   column_to_rownames( "gene" ) %>% as.matrix
 
@@ -30,6 +30,10 @@ mTT <- mTT[ rownames(mTT) %in% rownames(mAP), ]
 
 stopifnot( identical( dim(mAP), dim(mTT) ) )
 stopifnot( identical( rownames(mAP), rownames(mTT) ) )
+
+prob2odds <- function(p) p / ( 1 - p )
+
+thresh <- .6
 
 # Function to get data frame, with binning
 get_df <- function( gene, bin=3 ) {
@@ -104,3 +108,12 @@ server <- function(input, output) {
 # Run the application 
 shinyApp(ui = ui, server = server)
 
+
+
+
+## Appendix
+
+# How many bins are called significant in the tunnel?
+tunnel <- 10:90
+a <- binom.agresti.coull( as.vector( mAP[,tunnel] ), as.vector( mAP[,tunnel]+mTT[,tunnel] ) )
+sum( a$lower > thresh ) / ( sum( a$lower > thresh ) + sum( a$upper < thresh ) )
