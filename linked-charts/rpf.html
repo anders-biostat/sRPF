@@ -1,0 +1,258 @@
+<head>
+	<title>sRPF</title>
+	<link rel="stylesheet" type="text/css" href="lib/linked-charts.css">
+	<script type="text/javascript" src="lib/linked-charts.min.js"></script>
+	<script type="text/javascript" src="data/rpf_input.js"></script>
+</head>
+<body>
+	<table><tr>
+		<td id="heatmap" style="vertical-align: top"></td>
+		<td style="vertical-align: top">
+			<div>
+				Bin size: 
+				<input type="text" id="binSize" onchange="recalculate();" value=6 size=3><br>
+				Threshold: 
+				<input type="text" id="threshold" onchange="recalculate();" value=0.6 size=3><br>
+				Minimal number of non-neutral bins:
+				<input type="text" id="min" onchange="heatmapUpdate();" value=10 size=3><br>
+			</div>
+			<div id="plot"></div>
+			<div>
+				Selected gene: 
+				<input type="text" id="selGene" onchange="geneChange();" size=5><br>
+			</div>			
+		</td>
+	</tr></table>
+	<script type="text/javascript">
+		var bindingData = {};
+		var selGene = Object.keys(data)[0];
+		document.getElementById("selGene").value = selGene;
+		var threshold = 0.6;
+		var binSize = 6;
+
+		var heatmap = lc.heatmap()
+			.width(600)
+			.height(1000)
+			.colourDomain(["up", "down", "neutr"])
+			.palette(["RoyalBlue", "Tomato", "LightGrey"])
+			.nrows(0)
+			.ncols(0)
+			.set_margins({left: 40, top: 40})
+			.value(function(rowId, colId) {
+				return bindingData[rowId].type[+colId];
+			})
+			.on_click(function(rowId, colId) {
+				selGene = rowId[0];
+				document.getElementById("selGene").value = selGene;
+				plot.update();
+			})
+			.place("#heatmap");
+
+		var plot = lc.axesChart()
+			.add_layer("layer");
+
+		var layer = plot.activeLayer();
+
+		layer
+			.add_property("lower", function(k) {return bindingData[selGene].lower[k]/threshold;})
+			.add_property("upper", function(k) {return bindingData[selGene].upper[k]/threshold;});
+
+		plot.syncProperties(layer);
+
+		layer.updateElements = function(){
+	    var sel = layer.g.selectAll( ".data_element" )
+	      .data( layer.elementIds(), function(d) {return d;} );
+	    sel.exit()
+	      .remove();  
+	    sel.enter().append( "rect" )
+	      .attr( "class", "data_element" )
+	      .merge(sel)
+	        .attr("id", function(d) {return "p" + (layer.id + "_" + d).replace(/[ .]/g,"_");})
+	        .on( "click", layer.get_on_click )
+	        .on( "mouseover", layer.get_elementMouseOver )
+	        .on( "mouseout", layer.get_elementMouseOut );
+		}
+
+		layer.updateElementPosition = function(){
+			layer.g.selectAll(".data_element").transition("elementPosition")
+        		.duration(layer.chart.transitionDuration())
+        .attr("x", function(d) {return layer.chart.axes.scale_x(d)})
+        .attr("y", function(d) {
+        	var value = layer.get_upper(d);
+        	return value === Infinity ? 0 :
+        		layer.chart.axes.scale_y(value);
+        })
+        .attr("width", function() {
+        	return layer.chart.axes.scale_x(1) - layer.chart.axes.scale_x(0);
+        })
+        .attr("height", function(d) {
+        	var upper = layer.get_upper(d),
+        		lower = layer.get_lower(d);
+        	if(lower == 0) lower = layer.chart.axes.scale_y.domain()[0];
+        	return upper === Infinity ? layer.chart.axes.scale_y(lower) :
+        		Math.abs(layer.chart.axes.scale_y(lower) - layer.chart.axes.scale_y(upper));
+        });
+		}
+
+		layer.updateElementStyle = function() {
+    	layer.resetColourScale();
+			layer.g.selectAll(".data_element").transition("elementStyle")
+        		.duration(layer.chart.transitionDuration())
+        .attr("fill", function(d) {return layer.get_colour(d)})
+        .attr("opacity", function(d) {return layer.get_opacity(d)});
+		}
+
+		recalculate();
+
+		plot
+			.logScaleY(2)
+			.nelements(function() {return bindingData[selGene].lower.length;})
+			.opacity(function(k) {
+				return bindingData[selGene].opac[k]
+			})
+			.colourValue(function(k) {return bindingData[selGene].type[k]})
+			.layerDomainX(function() {return [0, layer.nelements()]})
+			.layerDomainY(function() {
+				var uppers = layer.elementIds().map(function(e) {return layer.get_upper(e)})
+					.filter(function(e) {return e != Infinity});
+				return [Math.pow(2, -4), d3.max(uppers)];
+			})
+			.colourDomain(["up", "down", "neutr"])
+			.palette(["RoyalBlue", "Tomato", "LightGrey"])
+			.title(function() {return selGene;})
+			.informText(function(k) {
+				return "<b>Position:</b> " + (k * binSize + 1) + "-" + ((k + 1) * binSize) + "<br>" + 
+					"<b>TT:</b> " + bindingData[selGene].TT[k] + "<br>" +
+					"<b>AP:</b> " + bindingData[selGene].AP[k] + "<br>";			 
+			})
+			.place("#plot");
+
+		function recalculate() {
+			binSize = +document.getElementById("binSize").value;
+			threshold = +document.getElementById("threshold").value;
+
+			for(var gene in data) {
+				bindingData[gene] = getIntervals(bins(data[gene].AP, binSize), bins(data[gene].TT, binSize));
+				compareToThreshold(bindingData[gene], threshold);
+			}
+
+			heatmapUpdate();
+			if(plot.svg)
+				plot.update();
+		}
+
+		function geneChange() {
+			selGene = document.getElementById("selGene").value;
+			plot.update();
+		}
+
+		function heatmapUpdate() {
+			var minNum = +document.getElementById("min").value,
+				maxCols = 0, rowIds = [];
+
+			for(var gene in bindingData)
+				if(bindingData[gene].up + bindingData[gene].down > minNum){
+					rowIds.push(gene);
+					maxCols = d3.max([maxCols, bindingData[gene].lower.length]);
+				}
+				heatmap
+					.rowIds(rowIds)
+					.ncols(maxCols)
+					.reorder("Row", function(a, b) {
+						return bindingData[a].up - bindingData[a].down -
+										bindingData[b].up + bindingData[b].down
+					})
+					.update();
+		}
+
+		function bins(row, binSize) {
+			var newRow = [], leftPos = 0;
+			while(leftPos < row.length){
+				newRow.push(d3.sum(row.slice(leftPos, leftPos + binSize)))
+				leftPos += binSize;
+			}
+			return newRow;
+		}
+
+		function getIntervals(x, y) {
+			var z = 1.96, z2 = 3.84;
+			var lower = [], upper = [], opac = [];
+			var n_hat, p_hat;
+			for(var i = 0; i < x.length; i++) {
+				n_hat = x[i] + y[i] + z2;
+				p_hat = 1/n_hat * (x[i] + z2/2);
+				lower.push(inv(p_hat - z * Math.sqrt(p_hat/n_hat * (1 - p_hat))));
+				upper.push(inv(p_hat + z * Math.sqrt(p_hat/n_hat * (1 - p_hat))));
+				opac.push(get_opac(x[i], y[i]));
+			}
+			var res = {};
+			res.lower = lower;
+			res.upper = upper;
+			res.opac = opac;
+			res.AP = x;
+			res.TT = y;
+
+			return res;
+		}
+
+		function inv(value) {
+			value = d3.min([value, 1]);
+			value = d3.max([value, 0]);
+
+			return value/(1 - value);
+		}
+
+		function get_opac(x, y) {
+			if(x * y == 0) return 0;
+			return d3.min([Math.pow(1/(1/x + 1/y), 2)/100, 1]);
+		}
+
+		function compareToThreshold(data, thr) {
+			data.type = [];
+			data.up = 0;
+			data.down = 0;
+			var type;
+			for(var i = 0; i < data.lower.length; i++) {
+				type = data.lower[i] > thr ? "up" : (data.upper[i] < thr ? "down" : "neutr");
+				data.type.push(type);
+				if(type == "up") data.up++;
+				if(type == "down") data.down++;
+			}
+		}
+
+
+/*
+			.clusterRowMetric(function(a, b) {
+			  var trunc = function(x) {
+			  	var i = 0;
+			  	while(x[i]) i++;
+			  	return x.slice(0, i).map(function(e) {
+			  		return e == "up" ? 1 : (e == "down" ? -1 : 0);
+			  	});
+			  }
+
+			  a = trunc(a);
+			  b = trunc(b);
+
+			  if(a.length == b.length) return lc.getEuclideanDistance(a, b);
+			  
+			  if(a.length > b.length){
+			  	var c = a;
+			  	a = b;
+			  	b = c;
+			  }
+
+			  var step = (b.length - 1) / (a.length - 1);
+			  var c = [], i = 0, left, right;
+			  while(i < b.length){
+			  	left = Math.floor(i); right = Math.ceil(i + step);
+			  	c.push(d3.sum(b.slice(left, right)) - 
+			  		b[left] * (i - left) - b[right - 1] * (right - i - step));
+			  	i += step;
+			  }
+			  
+			  return lc.getEuclideanDistance(a, c);
+			})
+*/		
+	</script>
+</body>
