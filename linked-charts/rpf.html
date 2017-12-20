@@ -45,6 +45,7 @@
 				selGene = rowId[0];
 				document.getElementById("selGene").value = selGene;
 				plot.update();
+				totalAmount.update();
 			})
 			.place("#heatmap");
 
@@ -105,6 +106,7 @@
 		recalculate();
 
 		plot
+			.height(300)
 			.logScaleY(2)
 			.nelements(function() {return bindingData[selGene].lower.length;})
 			.opacity(function(k) {
@@ -127,6 +129,27 @@
 			})
 			.place("#plot");
 
+		lc.parametricCurve("line", plot)
+			.xFunction(function(t) {return t + 0.5})
+			.yFunction(function(t) {
+				t = Math.round(t);
+				return bindingData[selGene].midpoint[t]/threshold;
+			})
+			.lineWidth(0.5)
+			.nsteps(function() {return bindingData[selGene].lower.length;})
+			.paramRange(function() {return [0, bindingData[selGene].lower.length];})
+			.place_layer("line");
+
+		var totalAmount = lc.parametricCurve()
+			.height(300)
+			.elementIds(["TT", "AP"])
+			.colourValue(function(d) {return d})
+			.xFunction(function(t) {return t})
+			.yFunction(function(t, d) {return data[selGene][d][Math.round(t)];})
+			.nsteps(function() {return data[selGene].AP.length;})
+			.paramRange(function() {return [0, data[selGene].TT.length]})
+			.place("#plot");
+
 		function recalculate() {
 			binSize = +document.getElementById("binSize").value;
 			threshold = +document.getElementById("threshold").value;
@@ -137,13 +160,16 @@
 			}
 
 			heatmapUpdate();
-			if(plot.svg)
+			if(plot.svg) {
 				plot.update();
+				totalAmount.update();
+			}
 		}
 
 		function geneChange() {
 			selGene = document.getElementById("selGene").value;
 			plot.update();
+			totalAmount.update();
 		}
 
 		function heatmapUpdate() {
@@ -176,16 +202,19 @@
 
 		function getIntervals(x, y) {
 			var z = 1.96, z2 = 3.84;
-			var lower = [], upper = [], opac = [];
+			var lower = [], upper = [], opac = [], midpoint = [];
 			var n_hat, p_hat;
 			for(var i = 0; i < x.length; i++) {
 				n_hat = x[i] + y[i] + z2;
 				p_hat = 1/n_hat * (x[i] + z2/2);
 				lower.push(inv(p_hat - z * Math.sqrt(p_hat/n_hat * (1 - p_hat))));
 				upper.push(inv(p_hat + z * Math.sqrt(p_hat/n_hat * (1 - p_hat))));
+				midpoint.push(inv(p_hat));
 				opac.push(get_opac(x[i], y[i]));
 			}
 			var res = {};
+
+			res.midpoint = midpoint;
 			res.lower = lower;
 			res.upper = upper;
 			res.opac = opac;
